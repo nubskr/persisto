@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/gob"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -13,6 +14,10 @@ import (
 type stupidData struct {
 	SomeData     string
 	SomeMoreData int
+}
+
+type dummyStruct struct {
+	Data any
 }
 
 type LogEntry struct {
@@ -65,7 +70,10 @@ func DecodeMetadata(data []byte) Metadata {
 func (l *LogEntry) init(fileSize int64) {
 	var gobBuf bytes.Buffer
 	enc := gob.NewEncoder(&gobBuf)
-	if err := enc.Encode(l.Data); err != nil {
+	encapsulatedData := dummyStruct{
+		Data: l.Data,
+	}
+	if err := enc.Encode(encapsulatedData); err != nil {
 		panic(err)
 	}
 
@@ -95,7 +103,7 @@ func (l *LogEntry) getResult() string {
 }
 
 func decodeEntry(encoded string) {
-	fmt.Print("tryna decode: ", encoded)
+	// log.Print("tryna decode: ", encoded)
 	if !strings.HasPrefix(encoded, "/s") || !strings.HasSuffix(encoded, "/e") {
 		panic("Invalid encoded format")
 	}
@@ -103,20 +111,22 @@ func decodeEntry(encoded string) {
 	// Extract metadata (first 1024 bytes after /s)
 	metaBytes := []byte(encoded[2:1026])
 	metadata := DecodeMetadata(metaBytes)
-	fmt.Printf("Decoded Metadata: %+v\n", metadata)
+	// log.Printf("Decoded Metadata: %+v\n", metadata)
 
 	// Extract actual data using the size from metadata
 	dataSize := metadata.DataSize
 	dataBytes := []byte(encoded[1026 : 1026+dataSize])
 
 	// Decode gob data
-	var decodedData stupidData
+
+	// WARN: we need to specify type to decode :/
+	var decodedData dummyStruct
 	dec := gob.NewDecoder(bytes.NewBuffer(dataBytes))
 	if err := dec.Decode(&decodedData); err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("Decoded Data: %+v\n", decodedData)
+	log.Printf("Decoded Data: %+v\n", decodedData)
 }
 
 func AppendToFile(filePath string, data string) {
@@ -134,7 +144,6 @@ func AppendToFile(filePath string, data string) {
 
 func AppendToFileSafe(filePath string, data string, WALPath string) {
 	AppendToFile(WALPath, data)
-
 	AppendToFile(filePath, data)
 
 	// Verify the write by reading the last entry
@@ -153,7 +162,7 @@ func AppendToFileSafe(filePath string, data string, WALPath string) {
 		}
 		panic("Data verification failed")
 	} else {
-		fmt.Print("----Data verified, all good-----")
+		// log.Print("----Data verified, all good-----")
 	}
 
 	AppendToFile(WALPath, "conf") // TODO: do something better
@@ -179,7 +188,7 @@ func ReadWithOffset(filePath string, offset int64, length int) string {
 		panic(err)
 	}
 
-	// fmt.Printf("Read %d bytes from offset %d: %v\n", n, offset, buf[:n])
+	// log.Printf("Read %d bytes from offset %d: %v\n", n, offset, buf[:n])
 	return string(buf[:n])
 }
 
@@ -203,7 +212,7 @@ func ReadFileSequenatially(filePath string) {
 		decodeEntry(entry)
 		curOffset = l + r
 
-		fmt.Print("-x-x-x-x-x-x-x-x-x-x-x-x-x-x-\n\n")
+		log.Print("-x-x-x-x-x-x-x-x-x-x-x-x-x-x-\n\n")
 	}
 }
 
@@ -222,31 +231,28 @@ func ReadFileSequenatiallyInReverse(filePath string) {
 		}
 
 		encoded := ReadWithOffset(filePath, curOffset-readSize, int(readSize))
-		fmt.Print(1)
+		// log.Print(1)
 		if !strings.HasSuffix(encoded, "/e") {
 			panic("Invalid file format: entry should end with /e")
 		}
-		fmt.Print(2)
+		// log.Print(2)
 
 		// Get the suffix metadata (1KB before /e)
 		suffixMeta := DecodeMetadata([]byte(encoded[len(encoded)-1026 : len(encoded)-2]))
-		fmt.Print(3)
+		// log.Print(3)
 		// Calculate the start of current entry using offset from suffix metadata
 		entryStart := curOffset - int64(suffixMeta.Offset)
 
 		// Read the full entry
-		fmt.Print("trying to seek to ", entryStart)
+		log.Print("trying to seek to ", entryStart)
 		entry := ReadWithOffset(filePath, entryStart, int(entryStart)+int(suffixMeta.Offset))
-		fmt.Print("lol")
+		// log.Print("lol")
 		if !strings.HasPrefix(entry, "/s") {
-			fmt.Print("checking entry for: ", entry)
-			fmt.Print("-=-=-=-=")
 			panic("Invalid file format: entry should start with /s")
 		}
 
 		decodeEntry(entry)
 		curOffset = entryStart
-		fmt.Print("-x-x-x-x-x-x-x-x-x-x-x-x-x-x-\n\n")
 	}
 }
 
@@ -266,8 +272,43 @@ func NewLogEntry(data any, filePath string) *LogEntry {
 	return log
 }
 
-func startupChore(filePath string, WALPath string) {
+// returns the decoded entry based off offset
+func getEntryFromHead(filePath string, offset int64) any {
+	// log.Print("hi ", filePath)
+	// get the size of the file at filePath in bytes, print it along with offset
+	// stat, err := os.Stat(filePath)
+	// if err != nil {
+	// 	log.Fatal("error agya bruh: ", err)
+	// } else {
+	// 	log.Print("---- ", stat.Size(), " -- ", offset, " done ")
+	// }
+	encoded := ReadWithOffset(filePath, offset, 2048)
+	// log.Print("encoded shit is: ", encoded)
+	if !strings.HasPrefix(encoded, "/s") {
+		panic("Invalid file format: entry should start with /s")
+	}
 
+	metaBytes := []byte(encoded[2:1026])
+	metadata := DecodeMetadata(metaBytes)
+	// log.Print("metadata is: ", metadata)
+	entry := ReadWithOffset(filePath, offset, int(metadata.DataSize)+2052)
+	// log.Print("decoded entry is: ", decodeEntry(entry))
+	// log.Print("tadaaaaaaaaa")
+	// decodeEntry(entry)
+
+	dataBytes := []byte(entry[1026 : 1026+metadata.DataSize])
+
+	var decodedData dummyStruct
+	dec := gob.NewDecoder(bytes.NewBuffer(dataBytes))
+	if err := dec.Decode(&decodedData); err != nil {
+		panic(err)
+	}
+
+	return decodedData
+}
+
+// this needs to be run for all files!
+func startupChore(filePath string, WALPath string) {
 	// Check if WAL file exists
 	stat, err := os.Stat(WALPath)
 	if err != nil {
@@ -315,7 +356,7 @@ func startupChore(filePath string, WALPath string) {
 		if err != nil {
 			panic(err)
 		}
-		fmt.Print("wtf is this man eww: ", mainFileStat)
+		log.Print("wtf is this man eww: ", mainFileStat)
 
 		// Truncate main file to remove incomplete write
 		if err := os.Truncate(filePath, suffixMeta.Offset); err != nil {
@@ -324,28 +365,32 @@ func startupChore(filePath string, WALPath string) {
 
 		// Clean WAL
 		os.Truncate(WALPath, 0)
-	}
-}
 
-func main() {
-	filePath := "/Users/nubskr/pxrs/persisto/log.log"
-	WALPath := "/Users/nubskr/pxrs/persisto/WAL.log"
-	startupChore(filePath, WALPath)
-
-	data := stupidData{
-		SomeData:     "hie daddy UwU",
-		SomeMoreData: 282829,
+		// TODO: retry the darn transaction and try to get conf in WAL
 	}
 
-	log := NewLogEntry(data, filePath)
-
-	encoded_entry := log.getResult()
-
-	AppendToFileSafe(filePath, encoded_entry, WALPath)
-
-	fmt.Print("=======start")
-	ReadFileSequenatiallyInReverse(filePath)
+	//
 }
+
+// func main() {
+// 	filePath := "/Users/nubskr/pxrs/persisto/log.log"
+// 	WALPath := "/Users/nubskr/pxrs/persisto/WAL.log"
+// 	startupChore(filePath, WALPath)
+
+// data := stupidData{
+// 	SomeData:     "hie daddy UwU",
+// 	SomeMoreData: 282829,
+// }
+
+// 	// log := NewLogEntry(data, filePath)
+
+// 	// encoded_entry := log.getResult()
+
+// 	// AppendToFileSafe(filePath, encoded_entry, WALPath)
+
+// 	// log.Print("=======start")
+// 	// ReadFileSequenatiallyInReverse(filePath)
+// }
 
 /*
 \s(1kb metadata)(actual data)(1 kb metadata)\e

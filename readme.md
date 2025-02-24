@@ -50,3 +50,67 @@ about the `processed` log, we only read it backwards to find the last entry, not
 we can add some sort of versioning to `processed` files so that if due to application crash, the old processed file remains even after a snapshot was created, we ignore it
 
 ignore infinite log growth issue for now
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+need folder_path for the project intergrating persisto
+
+keep all files by creating a directory in that folder `.persisto` and the names of files would just be the names of variables
+
+
+persisto maintains some internal use KV pairs for its working, the internal keys have `_` as prefix
+
+the below stuff ignores WAL as it is internally managed
+
+## internal implementation of KV store:
+
+two files: main and index
+
+- have an in memory key index pair
+- append whatever write operation comes to main and append the updated {key,new_offset} in an index file
+- update in memory index
+
+startup step: 
+    - populate in memory index by looking at index file , if no index file then read whole main
+
+## internal implementation of queue:
+
+files: main , one KV pair
+
+- append whatever thing in main
+- an read_offset KV pair which keeps track of last thing consumed
+
+- to consume an entry from queue, read the entry and update the read_offset
+
+
+
+
+
+ENSURE ALL YOUR STRUCTS YOU WANNA USE ARE REGISTERED WITH GOB SOMEWHERE LIKE THIS: `gob.Register(stupidStruct{})`
