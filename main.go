@@ -51,8 +51,8 @@ func PopQueue(queueName string) any {
 
 	offset, exists := queueIndex[queueName]
 	if !exists {
-		return nil
-		// queueIndex[queueName] = 0
+		// return nil
+		queueIndex[queueName] = 0
 	}
 	// log.Print("offset is: ", queueIndex[queueName])
 	fileInfo, _ := os.Stat(filePath)
@@ -73,18 +73,19 @@ func PopQueue(queueName string) any {
 }
 
 func SetMapVal(key string, data any) error {
-	filePath, WALPath := getFilePaths(key + "_KV")
+	filePath, WALPath := getFilePaths("KV")
 	offset, _ := os.Stat(filePath)
 	AppendToFileSafe(filePath, NewLogEntry(data, filePath).getResult(), WALPath)
-	indexFile, _ := getFilePaths(key + "_index")
-	AppendToFileSafe(indexFile, NewLogEntry(offset.Size(), indexFile).getResult(), WALPath)
+	indexFile, _ := getFilePaths("indexes")
+	AppendToFileSafe(indexFile, NewLogEntry(KVindex{Key: key, Offset: offset.Size()}, indexFile).getResult(), WALPath)
 	keyIndex[key] = offset.Size()
 	return nil
 }
 
 func GetMapVal(key string) any {
-	filePath, _ := getFilePaths(key)
-	log.Print("filepath is: ", filePath)
+	// filePath, _ := getFilePaths(key)
+	filePath := "./.persisto/KV_main"
+	// log.Print("filepath is: ", filePath)
 	offset, exists := keyIndex[key]
 	if !exists {
 		return nil // Key not there
@@ -94,6 +95,7 @@ func GetMapVal(key string) any {
 
 func main() {
 	gob.Register(stupidData{})
+	gob.Register(KVindex{})
 	// err := SetMapVal("key1", "val1")
 	lolol := stupidData{
 		SomeData:     "hie daddy UwU",
@@ -114,5 +116,6 @@ func main() {
 
 	log.Print(PopQueue("Q1"))
 	log.Print(PopQueue("Q1"))
+	// ImportKVData()
 
 }

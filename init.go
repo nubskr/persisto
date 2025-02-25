@@ -20,6 +20,11 @@ type dummyStruct struct {
 	Data any
 }
 
+type KVindex struct {
+	Key    string
+	Offset int64
+}
+
 type LogEntry struct {
 	PrefixMeta  string
 	SuffixMeta  string
@@ -102,7 +107,7 @@ func (l *LogEntry) getResult() string {
 	return "/s" + l.PrefixMeta + l.EncodedData + l.SuffixMeta + "/e"
 }
 
-func decodeEntry(encoded string) {
+func decodeEntry(encoded string) any {
 	// log.Print("tryna decode: ", encoded)
 	if !strings.HasPrefix(encoded, "/s") || !strings.HasSuffix(encoded, "/e") {
 		panic("Invalid encoded format")
@@ -126,7 +131,8 @@ func decodeEntry(encoded string) {
 		panic(err)
 	}
 
-	log.Printf("Decoded Data: %+v\n", decodedData)
+	// log.Printf("Decoded Data: %+v\n", decodedData)
+	return decodedData.Data
 }
 
 func AppendToFile(filePath string, data string) {
@@ -209,10 +215,8 @@ func ReadFileSequenatially(filePath string) {
 		metadata := DecodeMetadata(metaBytes)
 		l, r := curOffset, int(metadata.DataSize)+2052
 		entry := ReadWithOffset(filePath, int64(l), r)
-		decodeEntry(entry)
+		log.Print(decodeEntry(entry))
 		curOffset = l + r
-
-		log.Print("-x-x-x-x-x-x-x-x-x-x-x-x-x-x-\n\n")
 	}
 }
 
@@ -372,6 +376,43 @@ func startupChore(filePath string, WALPath string) {
 	//
 }
 
+func ReadFileSequenatiallyAndReturnData(filePath string, startingOffset int) []any {
+	curOffset := startingOffset
+	dataColl := make([]any, 0)
+	for {
+		// read in a 2kb buffer starting from curOffset
+		encoded := ReadWithOffset(filePath, int64(curOffset), 2048)
+		if len(encoded) < 2 {
+			break
+		}
+		if !strings.HasPrefix(encoded, "/s") {
+			panic("Invalid file format: entry should start with /s")
+		}
+
+		metaBytes := []byte(encoded[2:1026])
+		metadata := DecodeMetadata(metaBytes)
+		l, r := curOffset, int(metadata.DataSize)+2052
+		entry := ReadWithOffset(filePath, int64(l), r)
+		log.Print("entry is: ", entry)
+		dataColl = append(dataColl, decodeEntry(entry))
+		curOffset = l + r
+
+		if int64(curOffset) == GetFileSize(filePath) {
+			break
+		}
+	}
+
+	return dataColl
+}
+
+func GetFileSize(filePath string) int64 {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
 // func main() {
 // 	filePath := "/Users/nubskr/pxrs/persisto/log.log"
 // 	WALPath := "/Users/nubskr/pxrs/persisto/WAL.log"
@@ -397,3 +438,5 @@ func startupChore(filePath string, WALPath string) {
 
 note that the `padding` is only relevant for WAL, it's NOT relevant in actual data, please remove it from there in future to avoid any confusions
 */
+
+//TODO: make sure to have some sort of init function which rebuilds all KV indexes at startup

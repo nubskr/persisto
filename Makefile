@@ -1,2 +1,2 @@
 build:
-	go run init.go main.go
+	go run init.go main.go imports.go
