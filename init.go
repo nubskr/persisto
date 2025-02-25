@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/gob"
 	"fmt"
+	"hash/crc32"
 	"log"
 	"os"
 	"strings"
@@ -36,6 +37,7 @@ type Metadata struct {
 	CreatedAt int64 // 8 bytes
 	DataSize  int64
 	Offset    int64
+	Checksum  uint32 // 4 byte string
 	Padding   string // filler
 }
 
@@ -44,13 +46,12 @@ func (m *Metadata) Encode() string {
 	binary.LittleEndian.PutUint64(buf[0:8], uint64(m.CreatedAt))
 	binary.LittleEndian.PutUint64(buf[8:16], uint64(m.DataSize))
 	binary.LittleEndian.PutUint64(buf[16:24], uint64(m.Offset))
-	// 8bytes each for above stuff, so 8*3 = 24
+	binary.LittleEndian.PutUint32(buf[24:28], uint32(m.Checksum))
+	// 8bytes each for above stuff + 4bytes checksum for data, so 8*3 + 4 = 28
 
-	copy(buf[24:], []byte(m.Padding))
-	if len(m.Padding) < 1008 {
-		for i := 24 + len(m.Padding); i < 1024; i++ {
-			buf[i] = 'X'
-		}
+	copy(buf[28:], []byte(m.Padding))
+	for i := 28 + len(m.Padding); i < 1024; i++ {
+		buf[i] = 'X'
 	}
 
 	return string(buf)
@@ -64,7 +65,8 @@ func DecodeMetadata(data []byte) Metadata {
 		CreatedAt: int64(binary.LittleEndian.Uint64(data[0:8])),
 		DataSize:  int64(binary.LittleEndian.Uint64(data[8:16])),
 		Offset:    int64(binary.LittleEndian.Uint64(data[16:24])),
-		Padding:   string(data[24:]),
+		Checksum:  uint32(binary.LittleEndian.Uint32(data[24:28])),
+		Padding:   string(data[28:]),
 	}
 }
 
@@ -83,11 +85,13 @@ func (l *LogEntry) init(fileSize int64) {
 	}
 
 	l.EncodedData = gobBuf.String()
+	checksum := getDataChecksum(l.EncodedData)
 
 	prefixMetadata := Metadata{
 		CreatedAt: time.Now().Unix(),
 		DataSize:  int64(len(l.EncodedData)),
 		Offset:    fileSize, // file ka size ? this is not threadsafe just so you know
+		Checksum:  checksum,
 		Padding:   "",
 	}
 
@@ -107,6 +111,10 @@ func (l *LogEntry) getResult() string {
 	return "/s" + l.PrefixMeta + l.EncodedData + l.SuffixMeta + "/e"
 }
 
+func getDataChecksum(data string) uint32 {
+	return crc32.ChecksumIEEE([]byte(data))
+}
+
 func decodeEntry(encoded string) any {
 	// log.Print("tryna decode: ", encoded)
 	if !strings.HasPrefix(encoded, "/s") || !strings.HasSuffix(encoded, "/e") {
@@ -122,9 +130,17 @@ func decodeEntry(encoded string) any {
 	dataSize := metadata.DataSize
 	dataBytes := []byte(encoded[1026 : 1026+dataSize])
 
+	// get the checksum of dataBytes, compare it to metadata, if it does not matches, it means data is corrupted
+	currChecksum := getDataChecksum(string(dataBytes))
+
+	if currChecksum != metadata.Checksum {
+		log.Print("xxxxxxx-we fucked up sire-xxxxxxx")
+		return nil
+	} else {
+		log.Print("---file integrity looks good---")
+	}
 	// Decode gob data
 
-	// WARN: we need to specify type to decode :/
 	var decodedData dummyStruct
 	dec := gob.NewDecoder(bytes.NewBuffer(dataBytes))
 	if err := dec.Decode(&decodedData); err != nil {
@@ -308,11 +324,11 @@ func getEntryFromHead(filePath string, offset int64) any {
 		panic(err)
 	}
 
-	return decodedData
+	return decodedData.Data
 }
 
 // this needs to be run for all files!
-func startupChore(filePath string, WALPath string) {
+func fileSanityChore(filePath string, WALPath string) {
 	// Check if WAL file exists
 	stat, err := os.Stat(WALPath)
 	if err != nil {
@@ -380,6 +396,9 @@ func ReadFileSequenatiallyAndReturnData(filePath string, startingOffset int) []a
 	curOffset := startingOffset
 	dataColl := make([]any, 0)
 	for {
+		if int64(curOffset) == GetFileSize(filePath) {
+			break
+		}
 		// read in a 2kb buffer starting from curOffset
 		encoded := ReadWithOffset(filePath, int64(curOffset), 2048)
 		if len(encoded) < 2 {
@@ -393,13 +412,10 @@ func ReadFileSequenatiallyAndReturnData(filePath string, startingOffset int) []a
 		metadata := DecodeMetadata(metaBytes)
 		l, r := curOffset, int(metadata.DataSize)+2052
 		entry := ReadWithOffset(filePath, int64(l), r)
-		log.Print("entry is: ", entry)
+		// log.Print("entry is: ", entry)
 		dataColl = append(dataColl, decodeEntry(entry))
 		curOffset = l + r
 
-		if int64(curOffset) == GetFileSize(filePath) {
-			break
-		}
 	}
 
 	return dataColl
