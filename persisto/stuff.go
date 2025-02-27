@@ -1,6 +1,7 @@
 package persisto
 
 import (
+	"encoding/gob"
 	"log"
 	"os"
 	"path/filepath"
@@ -143,6 +144,8 @@ func startupChore() {
 }
 
 func Init() {
+	gob.Register(stupidData{})
+	gob.Register(KVindex{})
 	startupChore()
 	// TODO: also add startChore for queues!!
 }
