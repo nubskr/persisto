@@ -142,6 +142,11 @@ func startupChore() {
 	log.Print("----restore done----")
 }
 
+func Init() {
+	startupChore()
+	// TODO: also add startChore for queues!!
+}
+
 // func main() {
 // 	gob.Register(stupidData{})
 // 	gob.Register(KVindex{})

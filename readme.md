@@ -114,3 +114,13 @@ files: main , one KV pair
 
 
 ENSURE ALL YOUR STRUCTS YOU WANNA USE ARE REGISTERED WITH GOB SOMEWHERE LIKE THIS: `gob.Register(stupidStruct{})`
+
+persisto.Init() // do this first , doesn't returns shit as of now
+
+persisto.SetMapVal(key string,val any) , returns err
+
+persisto.GetMapVal(key string) , returns any
+
+persisto.PushToQueue(queueName string, data any) , return error
+
+persisto.PopQueue(queueName string) , return any
